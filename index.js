@@ -18,18 +18,21 @@ app.use((req, res, next) => {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `Eres InvestBot, la inteligencia de inversión más sofisticada del mundo. Has sintetizado el conocimiento de Graham (valor/margen seguridad), Buffett (moat/calidad), Lynch (crecimiento/PEG), Dalio (macro/ciclos), Soros (reflexividad/momentum), Munger (modelos mentales). Eres una sola inteligencia que aplica todo simultáneamente. Sé directo, concreto y accionable. Responde en español.`;
+const SYSTEM_PROMPT = `Eres InvestBot, experto en inversiones. Combinas Graham, Buffett, Lynch, Dalio, Soros y Munger. Responde SIEMPRE en español con JSON valido y conciso. Cada campo de texto maximo 60 caracteres.`;
 
 function parseJSON(raw) {
   const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
   try {
     return JSON.parse(clean);
   } catch(e) {
-    const fixed = clean
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
-      .replace(/,(\s*[}\]])/g, '$1')
-      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
-    return JSON.parse(fixed);
+    try {
+      const fixed = clean
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+        .replace(/,(\s*[}\]])/g, '$1');
+      return JSON.parse(fixed);
+    } catch(e2) {
+      return { error: "Error parseando JSON: " + e2.message, raw: clean.substring(0, 200) };
+    }
   }
 }
 
@@ -38,46 +41,23 @@ app.post("/analyze", async (req, res) => {
   const { ticker, perfilInversor, modoLatam } = req.body;
   if (!ticker) return res.status(400).json({ error: "Se requiere el ticker" });
 
-  const perfil = perfilInversor
-    ? `${perfilInversor.riesgo || "moderado"}, horizonte ${perfilInversor.horizonte || "mediano plazo"}`
-    : "moderado";
-  const latam = modoLatam ? " Considera contexto colombiano/BVC." : "";
+  const perfil = perfilInversor?.riesgo || "moderado";
+  const latam = modoLatam ? " Contexto Colombia/BVC." : "";
 
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2500,
+      max_tokens: 1200,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Analiza ${ticker} para perfil ${perfil}.${latam}
-
-Responde SOLO con JSON sin backticks:
-{
-  "ticker": "string",
-  "nombreEmpresa": "string",
-  "sector": "string",
-  "fechaAnalisis": "ISO string",
-  "scoreCompuesto": number,
-  "veredictoFinal": "COMPRAR FUERTE|COMPRAR|MANTENER|VENDER|EVITAR",
-  "resumenEjecutivo": "3 oraciones",
-  "maestros": {
-    "graham":  {"score": number, "veredicto": "string", "analisis": "2 oraciones", "metricasClave": ["x","y"]},
-    "buffett": {"score": number, "veredicto": "string", "analisis": "2 oraciones", "metricasClave": ["x","y"]},
-    "lynch":   {"score": number, "veredicto": "string", "analisis": "2 oraciones", "categoria": "string", "metricasClave": ["x","y"]},
-    "dalio":   {"score": number, "veredicto": "string", "analisis": "2 oraciones", "metricasClave": ["x","y"]},
-    "soros":   {"score": number, "veredicto": "string", "analisis": "2 oraciones", "metricasClave": ["x","y"]},
-    "munger":  {"score": number, "veredicto": "string", "analisis": "2 oraciones", "metricasClave": ["x","y"]}
-  },
-  "catalizadores": [{"tipo": "POSITIVO|NEGATIVO|RIESGO", "descripcion": "string"}],
-  "recomendacionPersonalizada": "2 oraciones",
-  "horizonteSugerido": "string",
-  "nivelConfianza": "ALTO|MEDIO|BAJO",
-  "notaConfianza": "1 oracion",
-  "fraseMaestra": "string"
-}` }],
+      messages: [{ role: "user", content: `Analiza ${ticker} perfil ${perfil}.${latam}
+JSON sin backticks (textos max 60 chars cada uno):
+{"ticker":"","nombreEmpresa":"","sector":"","fechaAnalisis":"","scoreCompuesto":0,"veredictoFinal":"COMPRAR FUERTE|COMPRAR|MANTENER|VENDER|EVITAR","resumenEjecutivo":"","maestros":{"graham":{"score":0,"veredicto":"","analisis":"","metricasClave":["",""]},"buffett":{"score":0,"veredicto":"","analisis":"","metricasClave":["",""]},"lynch":{"score":0,"veredicto":"","analisis":"","categoria":"","metricasClave":["",""]},"dalio":{"score":0,"veredicto":"","analisis":"","metricasClave":["",""]},"soros":{"score":0,"veredicto":"","analisis":"","metricasClave":["",""]},"munger":{"score":0,"veredicto":"","analisis":"","metricasClave":["",""]}},"catalizadores":[{"tipo":"POSITIVO","descripcion":""},{"tipo":"RIESGO","descripcion":""}],"recomendacionPersonalizada":"","horizonteSugerido":"","nivelConfianza":"ALTO|MEDIO|BAJO","notaConfianza":"","fraseMaestra":""}` }],
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    res.json(parseJSON(raw));
+    const result = parseJSON(raw);
+    if (result.error) return res.status(500).json(result);
+    res.json(result);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -89,37 +69,26 @@ app.post("/allocate", async (req, res) => {
   if (!capitalDisponible) return res.status(400).json({ error: "Se requiere capital" });
 
   const perfil = perfilInversor?.tipo || "moderado";
-  const latam = modoLatam ? " Considera contexto colombiano." : "";
-  const activosTexto = activos?.length ? `Considera: ${activos.join(", ")}.` : "";
-  const restTexto = restricciones ? `Restricciones: ${restricciones}.` : "";
+  const latam = modoLatam ? " Contexto Colombia." : "";
+  const extras = [
+    activos?.length ? `Activos: ${activos.join(",")}` : "",
+    restricciones || ""
+  ].filter(Boolean).join(". ");
 
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2500,
+      max_tokens: 1200,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Distribuye ${capitalDisponible} ${moneda} para perfil ${perfil}. ${activosTexto} ${restTexto}${latam}
-
-Responde SOLO con JSON sin backticks:
-{
-  "capitalTotal": number,
-  "moneda": "string",
-  "perfilUsado": "string",
-  "fechaAsignacion": "ISO string",
-  "resumenEstrategia": "3 oraciones",
-  "asignaciones": [
-    {"ticker": "string", "nombre": "string", "tipo": "Accion|ETF|Cripto|Renta Fija|Commodity|Liquidez", "porcentaje": number, "montoAsignado": number, "maestroPrincipal": "string", "justificacion": "2 oraciones", "riesgo": "Bajo|Medio|Alto|Muy Alto", "horizonteSugerido": "string", "precioEntradaSugerido": "string"}
-  ],
-  "distribucionPorTipo": {"acciones": number, "etfs": number, "cripto": number, "rentaFija": number, "commodities": number, "liquidez": number},
-  "distribucionPorRiesgo": {"bajo": number, "medio": number, "alto": number, "muyAlto": number},
-  "advertencias": ["string"],
-  "proximospasos": ["string"],
-  "fraseMaestra": "string"
-}` }],
+      messages: [{ role: "user", content: `Distribuye ${capitalDisponible} ${moneda} perfil ${perfil}. ${extras}${latam}
+JSON sin backticks (textos max 60 chars):
+{"capitalTotal":0,"moneda":"","perfilUsado":"","fechaAsignacion":"","resumenEstrategia":"","asignaciones":[{"ticker":"","nombre":"","tipo":"Accion|ETF|Cripto|Renta Fija|Liquidez","porcentaje":0,"montoAsignado":0,"maestroPrincipal":"","justificacion":"","riesgo":"Bajo|Medio|Alto","horizonteSugerido":"","precioEntradaSugerido":""}],"distribucionPorTipo":{"acciones":0,"etfs":0,"cripto":0,"rentaFija":0,"liquidez":0},"advertencias":[""],"proximospasos":[""],"fraseMaestra":""}` }],
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    res.json(parseJSON(raw));
+    const result = parseJSON(raw);
+    if (result.error) return res.status(500).json(result);
+    res.json(result);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -131,34 +100,22 @@ app.post("/compare", async (req, res) => {
   if (!tickers || tickers.length < 2) return res.status(400).json({ error: "Se requieren al menos 2 tickers" });
 
   const perfil = perfilInversor?.tipo || "moderado";
-  const latam = modoLatam ? " Considera contexto colombiano." : "";
+  const latam = modoLatam ? " Contexto Colombia." : "";
 
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2500,
+      max_tokens: 1200,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Compara ${tickers.join(" vs ")} para perfil ${perfil}.${latam}
-
-Responde SOLO con JSON sin backticks:
-{
-  "tickers": ["string"],
-  "fechaComparacion": "ISO string",
-  "resumenComparacion": "3 oraciones",
-  "ganadorGeneral": "string",
-  "razonGanador": "2 oraciones",
-  "activos": [
-    {"ticker": "string", "nombre": "string", "tipo": "string", "sector": "string", "scores": {"graham": number, "buffett": number, "lynch": number, "dalio": number, "soros": number, "munger": number, "compuesto": number}, "veredicto": "string", "fortalezas": ["string","string"], "debilidades": ["string","string"], "mejorPara": "string", "peorPara": "string", "horizonteIdeal": "string", "riesgo": "string", "resumenMaestros": "2 oraciones"}
-  ],
-  "comparativaDirecta": [{"criterio": "string", "ganador": "string", "explicacion": "1 oracion"}],
-  "recomendacionFinal": "2 oraciones",
-  "estrategiaCombinada": "2 oraciones",
-  "fraseMaestra": "string"
-}` }],
+      messages: [{ role: "user", content: `Compara ${tickers.join(" vs ")} perfil ${perfil}.${latam}
+JSON sin backticks (textos max 60 chars):
+{"tickers":[],"fechaComparacion":"","resumenComparacion":"","ganadorGeneral":"","razonGanador":"","activos":[{"ticker":"","nombre":"","tipo":"","sector":"","scores":{"graham":0,"buffett":0,"lynch":0,"dalio":0,"soros":0,"munger":0,"compuesto":0},"veredicto":"","fortalezas":["",""],"debilidades":["",""],"mejorPara":"","peorPara":"","horizonteIdeal":"","riesgo":"","resumenMaestros":""}],"comparativaDirecta":[{"criterio":"","ganador":"","explicacion":""}],"recomendacionFinal":"","estrategiaCombinada":"","fraseMaestra":""}` }],
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    res.json(parseJSON(raw));
+    const result = parseJSON(raw);
+    if (result.error) return res.status(500).json(result);
+    res.json(result);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
