@@ -46,7 +46,7 @@ app.post("/analyze", async (req, res) => {
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1800,
+      max_tokens: 2500,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: `Analiza ${ticker} para perfil ${perfil}.${latam}
 
@@ -96,7 +96,7 @@ app.post("/allocate", async (req, res) => {
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1800,
+      max_tokens: 2500,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: `Distribuye ${capitalDisponible} ${moneda} para perfil ${perfil}. ${activosTexto} ${restTexto}${latam}
 
@@ -136,7 +136,7 @@ app.post("/compare", async (req, res) => {
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1800,
+      max_tokens: 2500,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: `Compara ${tickers.join(" vs ")} para perfil ${perfil}.${latam}
 
