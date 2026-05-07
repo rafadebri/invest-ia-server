@@ -107,9 +107,13 @@ Responde SOLO con JSON sin backticks:
 }` }],
     });
 
-    const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    res.json(JSON.parse(clean));
+   const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+try {
+  res.json(JSON.parse(clean));
+} catch(parseErr) {
+  const fixed = clean.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").replace(/,(\s*[}\]])/g, '$1');
+  res.json(JSON.parse(fixed));
+}
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
