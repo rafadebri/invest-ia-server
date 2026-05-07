@@ -8,11 +8,10 @@ const Anthropic = require("@anthropic-ai/sdk");
 const app = express();
 app.use(express.json());
 
-// CORS — permite llamadas desde GitHub Pages
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");
-  res.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.header("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
@@ -20,6 +19,19 @@ app.use((req, res, next) => {
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `Eres InvestBot, la inteligencia de inversión más sofisticada del mundo. Has sintetizado el conocimiento de Graham (valor/margen seguridad), Buffett (moat/calidad), Lynch (crecimiento/PEG), Dalio (macro/ciclos), Soros (reflexividad/momentum), Munger (modelos mentales). Eres una sola inteligencia que aplica todo simultáneamente. Sé directo, concreto y accionable. Responde en español.`;
+
+function parseJSON(raw) {
+  const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  try {
+    return JSON.parse(clean);
+  } catch(e) {
+    const fixed = clean
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+      .replace(/,(\s*[}\]])/g, '$1')
+      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+    return JSON.parse(fixed);
+  }
+}
 
 // ── ANALIZAR ──────────────────────────────────────────────────────────────────
 app.post("/analyze", async (req, res) => {
@@ -65,8 +77,7 @@ Responde SOLO con JSON sin backticks:
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    res.json(JSON.parse(clean));
+    res.json(parseJSON(raw));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -97,7 +108,7 @@ Responde SOLO con JSON sin backticks:
   "fechaAsignacion": "ISO string",
   "resumenEstrategia": "3 oraciones",
   "asignaciones": [
-    {"ticker": "string", "nombre": "string", "tipo": "Acción|ETF|Cripto|Renta Fija|Commodity|Liquidez", "porcentaje": number, "montoAsignado": number, "maestroPrincipal": "string", "justificacion": "2 oraciones", "riesgo": "Bajo|Medio|Alto|Muy Alto", "horizonteSugerido": "string", "precioEntradaSugerido": "string"}
+    {"ticker": "string", "nombre": "string", "tipo": "Accion|ETF|Cripto|Renta Fija|Commodity|Liquidez", "porcentaje": number, "montoAsignado": number, "maestroPrincipal": "string", "justificacion": "2 oraciones", "riesgo": "Bajo|Medio|Alto|Muy Alto", "horizonteSugerido": "string", "precioEntradaSugerido": "string"}
   ],
   "distribucionPorTipo": {"acciones": number, "etfs": number, "cripto": number, "rentaFija": number, "commodities": number, "liquidez": number},
   "distribucionPorRiesgo": {"bajo": number, "medio": number, "alto": number, "muyAlto": number},
@@ -107,13 +118,8 @@ Responde SOLO con JSON sin backticks:
 }` }],
     });
 
-   const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-try {
-  res.json(JSON.parse(clean));
-} catch(parseErr) {
-  const fixed = clean.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").replace(/,(\s*[}\]])/g, '$1');
-  res.json(JSON.parse(fixed));
-}
+    const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
+    res.json(parseJSON(raw));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -152,15 +158,13 @@ Responde SOLO con JSON sin backticks:
     });
 
     const raw = response.content.filter(b => b.type === "text").map(b => b.text).join("");
-    const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    res.json(JSON.parse(clean));
+    res.json(parseJSON(raw));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Health check
-app.get("/", (req, res) => res.json({ status: "Invest IA Server activo ✅" }));
+app.get("/", (req, res) => res.json({ status: "Invest IA Server activo" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
